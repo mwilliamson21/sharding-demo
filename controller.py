@@ -1,10 +1,10 @@
-
-
+__author__ = 'mwilliamson with help from E.Scheidt and Peter'
 
 import json
 import os
 from shutil import copyfile
 from typing import List, Dict
+
 
 filename = "chapter2.txt"
 
@@ -180,6 +180,13 @@ class ShardHandler(object):
 
         self.sync_replication()
 
+    def find_highest_replication_level(self):
+        ids = self.get_replication_ids()
+        if ids:
+            return int(max([x[-1] for x in ids]))
+        else:
+            return 0
+
     def add_replication(self) -> None:
         """Add a level of replication so that each shard has a backup. Label
         them with the following format:
@@ -197,8 +204,15 @@ class ShardHandler(object):
         """
         self.replication_level += 1
         current_level = self.replication_level
+        files = os.listdir('./data')
+        for f in files:
+            if '-' not in f:
+                copyfile(f'./data/{f}', f'./data/{f[0]}-{current_level}.txt')
+                self.mapping[f'{f[0]}-{current_level}'] = self.mapping[f[0]]
+        self.write_map()
 
-       pass
+
+       
 
     def remove_replication(self) -> None:
         """Remove the highest replication level.
@@ -223,15 +237,15 @@ class ShardHandler(object):
         """
         self.mapping = self.load_map()
 
-        keys = [int(z) for z in list(self.mapping.keys())]
-        keys.sort()
-        self.rep_count = 1
-        if os.path.exists(f'data/{keys[0]}-{self.rep_count}.txt'):
-            print('inther')
-            while os.path.exists(f'data/{keys[0]}-{self.rep_count}.txt'):
-                self.rep_count += 1
-            for num, key in enumerate(keys):
-                os.remove(f'data/{key}-{self.rep_count-1}.txt')
+        keys = [int(z) for z in self.get_shard_ids()]
+
+        rep_count = self.replication_level
+        if rep_count:
+            for key in keys:
+                if os.path.exists(f'data/{key}-{rep_count}.txt'):  
+                    os.remove(f'data/{key}-{rep_count}.txt')
+                    self.mapping.pop(f"{key}-{rep_count}")
+            self.write_map()
         else:
             print('no more replications')
             raise FileNotFoundError
@@ -241,7 +255,52 @@ class ShardHandler(object):
         """Verify that all replications are equal to their primaries and that
         any missing primaries are appropriately recreated from their
         replications."""
-        pass
+        def verify_replications():
+            primaries = []
+            replications = []
+
+            for filename in os.listdir('./data'):
+                if '-' not in filename:
+                    primaries.append(filename)
+                else:
+                    replications.append(filename)
+            for r in replications:
+                file_to_match = f'{r[0]}.txt'
+                primary_size = os.path.getsize(f'./data/{file_to_match}')
+                replication_size = os.path.getsize(f'./data/{r}')
+                if primary_size == replication_size:
+                    continue
+                else:
+                    # delete replication that does not match
+                    if os.path.exists(f'data/{r}'): 
+                        os.remove(f'data/{r}')
+                        print(f'data/{r} has been deleted')
+                    # recreate replication based on primary
+                    copyfile(f'./data/{file_to_match}', f'./data/{r}')
+                    print(f'./data/{r} has been recreated')
+        def verify_primaries():
+            # check mapping for what primaries should exist
+            expected_ids = self.get_shard_ids()
+            
+            # check files to insure every primary exists
+            primary_ids = []
+            for filename in os.listdir('./data'):
+                if '-' not in filename:
+                    primary_ids.append(filename[0])
+            for id in expected_ids:
+                if id in primary_ids:
+                    continue
+                else:
+                # if primary doesn't exist, recreate primary based on corresponding replication at current level of replication
+                    target_replication = f'./data/{id}-{self.find_highest_replication_level()}.txt'
+                    copyfile(target_replication, f'./data/{id}.txt')
+                    print(f'./data/{id}.txt was recreated from {target_replication}')
+        if self.get_replication_ids():
+            verify_primaries()
+            verify_replications()
+        else:
+            print('no replications')
+
 
     def get_shard_data(self, shardnum=None) -> [str, Dict]:
         """Return information about a shard from the mapfile."""
@@ -261,8 +320,13 @@ s = ShardHandler()
 
 s.build_shards(5, load_data_from_file())
 
-print(s.mapping.keys())
+print(s.mapping)
+
 
 # s.add_shard()
-
-print(s.mapping.keys())
+# s.remove_shard()
+s.find_highest_replication_level()
+# print(s.mapping.keys())
+# s.add_replication()
+# s.remove_replication()
+s.sync_replication()
